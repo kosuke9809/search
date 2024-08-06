@@ -3,6 +3,9 @@ package analyzer
 import (
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
+	"golang.org/x/text/width"
 )
 
 type CharFilter interface {
@@ -51,5 +54,63 @@ func (f MappingCharFilter) Filter(text string) string {
 type FullWidthToHalfWidthFilter struct{}
 
 func (f FullWidthToHalfWidthFilter) Filter(text string) string {
-	return ""
+	return width.Narrow.String(text)
+}
+
+type FullWidthSpaceToHalfWidthFilter struct{}
+
+func (f FullWidthSpaceToHalfWidthFilter) Filter(text string) string {
+	return strings.ReplaceAll(text, "　", " ")
+}
+
+type KatakanaNormalizationFilter struct{}
+
+func (f KatakanaNormalizationFilter) Filter(text string) string {
+	return norm.NFKC.String(text)
+}
+
+type DakutenNormalizationFilter struct{}
+
+func (f DakutenNormalizationFilter) Filter(text string) string {
+	return normalizeDakuten(text)
+}
+
+func normalizeDakuten(text string) string {
+	n := []rune{}
+	for i, r := range text {
+		if i > 0 && (r == '゛' || r == '゜') {
+			prev := n[len(n)-1]
+			combined := norm.NFKC.String(string([]rune{prev, r}))
+			n[len(n)-1] = []rune(combined)[0]
+		} else {
+			n = append(n, r)
+		}
+	}
+	return string(n)
+}
+
+type CompositeCharFilter struct {
+	Filters []CharFilter
+}
+
+func (f CompositeCharFilter) Filter(text string) string {
+	for _, filter := range f.Filters {
+		text = filter.Filter(text)
+	}
+	return text
+}
+
+func NewCompositeCharFilter(mappings map[string]string) CompositeCharFilter {
+	return CompositeCharFilter{
+		Filters: []CharFilter{
+			MappingCharFilter{Mappings: mappings},
+			FullWidthToHalfWidthFilter{},
+			FullWidthSpaceToHalfWidthFilter{},
+			WhitespaceNormalizationFilter{},
+			LowercaseFilter{},
+			PunctuationRemovalFilter{},
+			KatakanaNormalizationFilter{},
+			DakutenNormalizationFilter{},
+		},
+	}
 }
